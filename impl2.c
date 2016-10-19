@@ -58,7 +58,8 @@ mismatches, but nothing significant.
 #define MAX_ERROR			0.018 // 1.8%
 
 #define k(freq)				(int)(0.5 + (( (float)N * freq ) / SAMPLE_RATE))
-#define coeff(freq)			2*cos((2.0*M_PI*k(freq))/(float)N)
+#define coeff(freq)			2*cos((2.0*M_PI*(float)N)/k(freq))
+//#define coeff(freq)			2*cos((2.0*M_PI*k(freq))/(float)N)
 
 #ifndef M_PI
 #define M_PI (3.14159265358979323846)
@@ -96,23 +97,44 @@ void Generate(float frequency, uint8_t *buffer)
   /* Generate the test data */
   for (index = 0; index < N; index++)
   {
-    buffer[index] = (uint8_t) (100.0 * sin(index * step) + 100.0);
+    buffer[index] = (uint8_t) ( 100 * sin(index * step) + 100);
   }
 }
 
+float mag2db(float mag) {
+	//return 20 * log10(mag);
+	return mag;
+}
+
 int main(int argc, char *argv) {
+	float res;
 	printf("Starting with sample rate of %d hz, block size %d\n", SAMPLE_RATE, N);
 	printf("k for 941 is %d, Coeff for 941 is %f\n", k(941), coeff(941));
 	uint8_t buffer[N];
-	/*for (float i=641; i<=1241; i=i+15) {
+	for (float i=641; i<=1241; i=i+15) {
 		Generate(i, buffer);
 		float res = goertzel(buffer, coeff(941));
 		printf("Result: %7.1fhz (%f): %.5f, %.5f\n", i, coeff(i), res, sqrt(res));
-	}*/
-	Generate(941, buffer);
-	float res = goertzel(buffer, coeff(941));
-	printf("Result: %7.1fhz (%f): %.5f, %.5f\n", 941.0, coeff(941.0), res, sqrt(res));
-	fread(buffer, N, sizeof(uint8_t), stdin);
+	}
+	/*(Generate(941, buffer, 0.0);
 	res = goertzel(buffer, coeff(941));
-	printf("Result: %7.1fhz (%f): %.5f, %.5f\n", 941.0, coeff(941.0), res, sqrt(res));
+	printf("Result: %7.1fhz (%f): %.5f, %.5f\n", 941.0, coeff(941.0), mag2db(res), mag2db(sqrt(res)));
+	Generate(941, buffer, 10);
+	res = goertzel(buffer, coeff(941));
+	printf("Result: %7.1fhz (%f): %.5f, %.5f\n", 941.0, coeff(941.0), mag2db(res), mag2db(sqrt(res)));
+	Generate(941, buffer, 255/8);
+	res = goertzel(buffer, coeff(941));
+	printf("Result: %7.1fhz (%f): %.5f, %.5f\n", 941.0, coeff(941.0), mag2db(res), mag2db(sqrt(res)));
+	Generate(941, buffer, 255/4);
+	res = goertzel(buffer, coeff(941));
+	printf("Result: %7.1fhz (%f): %.5f, %.5f\n", 941.0, coeff(941.0), mag2db(res), mag2db(sqrt(res)));
+	Generate(941, buffer, 255/2);
+	res = goertzel(buffer, coeff(941));
+	printf("Result: %7.1fhz (%f): %.5f, %.5f\n", 941.0, coeff(941.0), mag2db(res), mag2db(sqrt(res)));*/
+	//Generate(941, buffer, 255.0);
+	//res = goertzel(buffer, coeff(941));
+	//printf("Result: %7.1fhz (%f): %.5f, %.5f\n", 941.0, coeff(941.0), mag2db(res), mag2db(sqrt(res)));
+	//fread(buffer, N, sizeof(uint8_t), stdin);
+	//res = goertzel(buffer, coeff(941));
+	//printf("Result: %7.1fhz (%f): %.5f, %.5f\n", 941.0, coeff(941.0), mag2db(res), mag2db(sqrt(res)));
 }
