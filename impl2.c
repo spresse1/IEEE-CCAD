@@ -47,6 +47,7 @@ mismatches, but nothing significant.
 #include <math.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <errno.h>
 
 // All times measured in msec
 #define SAMPLE_RATE			8000 // Hz
@@ -76,11 +77,7 @@ mismatches, but nothing significant.
 int stored_digits[15] = {0}; // Max length for a regulation phone number is 15
 int stored_digit_count = 0;
 
-#ifndef SIGNED_AUDIO
-#define SAMPLE	uint8_t
-#else
 #define SAMPLE int8_t
-#endif
 
 float goertzel(SAMPLE *samples, float coeff) {
 	float Q1=0,Q2=0;
@@ -104,34 +101,37 @@ void Generate(float frequency, SAMPLE *buffer)
   /* Generate the test data */
   for (index = 0; index < N; index++)
   {
-#ifdef SIGNED_AUDIO
     buffer[index] = (SAMPLE) (127.0 * sin(index * step));
-#else
-    buffer[index] = (SAMPLE) (127.0 * sin(index * step) + 127.0);
-#endif
   }
 }
 
 float mag2db(float mag) {
-#ifndef SIGNED_AUDIO
-	return 20 * log10(mag);
-#else
 	return 20 * log10(fabs(mag)/32768);
-#endif
 }
 
-int main(int argc, char *argv) {
+int main(int argc, char **argv) {
 	printf("Starting with sample rate of %d hz, block size %d\n", SAMPLE_RATE, N);
 	printf("k for 941 is %d, Coeff for 941 is %f\n", k(941), coeff(941));
 	SAMPLE buffer[N];
 	
-	Generate(941, buffer);
-	for (float i=296; i<=3400; i=i+15) {
-		//Generate(i, buffer);
-		//float res = goertzel(buffer, coeff(941));
+	FILE *infile;
+	if (argc==2) {
+		printf("readin file %s\n", argv[1]);
+		errno=0;
+		infile=fopen(argv[1], "r");
+		if (errno) {
+			perror(NULL);
+			exit(1);
+		}
+	} else {
+		printf("Using stdin %d\n", argc);
+		infile=stdin;
+	}
+	
+	fread(buffer, sizeof(SAMPLE), N, infile);
+	for (float i=296; i<=3400; i=i+60) {
 		float res = goertzel(buffer, coeff(i));
-		//printf("Result: %7.1fhz (%f): %.5f, %.5f\n", i, coeff(i), mag2db(res), mag2db(sqrt(res)));
-		//printf("%.5f, %.5f, %.5f, %.5f\n", res, sqrt(res), mag2db(res), mag2db(sqrtf(res)));
-		printf("%f, %.5f, %.5f\n", i, res, mag2db(res));
+	
+		printf("%f, %.5f, %.5f\n",i, res, mag2db(res));
 	}
 }
