@@ -43,6 +43,7 @@ and verified against the sample output there.  There are slight rounding
 mismatches, but nothing significant.
 */
 
+#include <stdlib.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -57,6 +58,14 @@ mismatches, but nothing significant.
 #define COL_FREQS			{697,  770,  852,  941 }
 #define MAX_ERROR			0.018 // 1.8%
 
+#define N					136	//105 is minimum for DTMF detection
+								//205 used by example implementation
+#define SAMPLE_LENGTH		N/(SAMPLE_RATE*1000) //in msec
+
+// Coefficent (k) calculated from DTMF frequency via k=N(fi/fs), where:
+//  N is the constant filter length
+//  fi is the dtmf frequency
+//  fs is the sampling frequency
 #define k(freq)				(int)(0.5 + (( (float)N * freq ) / SAMPLE_RATE))
 #define coeff(freq)			2*cos((2.0*M_PI*k(freq))/(float)N)
 
@@ -67,14 +76,13 @@ mismatches, but nothing significant.
 int stored_digits[15] = {0}; // Max length for a regulation phone number is 15
 int stored_digit_count = 0;
 
-// Coefficent (k) calculated from DTMF frequency via k=N(fi/fs), where:
-//  N is the constant filter length
-//  fi is the dtmf frequency
-//  fs is the sampling frequency
-#define N					205 //136 //105 is minimum for DTMF detection
+#ifndef SIGNED_AUDIO
+#define SAMPLE	uint8_t
+#else
+#define SAMPLE int8_t
+#endif
 
-
-float goertzel(uint8_t *samples, float coeff) {
+float goertzel(SAMPLE *samples, float coeff) {
 	float Q1=0,Q2=0;
 	for (int i=0; i<N; i++) {
 		// Copy variables for cycle
@@ -86,7 +94,7 @@ float goertzel(uint8_t *samples, float coeff) {
 	return Q1*Q1 + Q2*Q2-Q1*Q2*coeff;
 }
 
-void Generate(float frequency, uint8_t *buffer)
+void Generate(float frequency, SAMPLE *buffer)
 {
   int	index;
   float	step;
@@ -96,48 +104,34 @@ void Generate(float frequency, uint8_t *buffer)
   /* Generate the test data */
   for (index = 0; index < N; index++)
   {
-    buffer[index] = (uint8_t) (127.0 * sin(index * step) + 127.0);
-  }
-}
-
-void Generate2(float frequency, uint8_t *buffer)
-{
-  int	index;
-  float	step, step2;
-
-  step = frequency * ((2.0 * M_PI) / SAMPLE_RATE);
-  step2 = frequency * 2 * ((2.0 * M_PI) / SAMPLE_RATE);
-
-  /* Generate the test data */
-  for (index = 0; index < N; index++)
-  {
-    buffer[index] = (uint8_t) (64.0 * sin(index * step) + 64.0);
-    buffer[index] += (uint8_t) (64.0 * sin(index * step2) + 64.0);
+#ifdef SIGNED_AUDIO
+    buffer[index] = (SAMPLE) (127.0 * sin(index * step));
+#else
+    buffer[index] = (SAMPLE) (127.0 * sin(index * step) + 127.0);
+#endif
   }
 }
 
 float mag2db(float mag) {
+#ifndef SIGNED_AUDIO
 	return 20 * log10(mag);
+#else
+	return 20 * log10(fabs(mag)/32768);
+#endif
 }
 
 int main(int argc, char *argv) {
 	printf("Starting with sample rate of %d hz, block size %d\n", SAMPLE_RATE, N);
 	printf("k for 941 is %d, Coeff for 941 is %f\n", k(941), coeff(941));
-	uint8_t buffer[N];
+	SAMPLE buffer[N];
 	
-	//Generate(941, buffer);
-	for (float i=300; i<=3400; i=i+15) {
-		Generate(i, buffer);
-		float res = goertzel(buffer, coeff(941));
-		float res2 = goertzel(buffer, coeff(941/2));
+	Generate(941, buffer);
+	for (float i=296; i<=3400; i=i+15) {
+		//Generate(i, buffer);
+		//float res = goertzel(buffer, coeff(941));
+		float res = goertzel(buffer, coeff(i));
 		//printf("Result: %7.1fhz (%f): %.5f, %.5f\n", i, coeff(i), mag2db(res), mag2db(sqrt(res)));
 		//printf("%.5f, %.5f, %.5f, %.5f\n", res, sqrt(res), mag2db(res), mag2db(sqrtf(res)));
-		printf("%.5f, %.5f\n", res, res2);
+		printf("%f, %.5f, %.5f\n", i, res, mag2db(res));
 	}
-	//Generate(941, buffer);
-	//float res = goertzel(buffer, coeff(941));
-	//printf("Result: %7.1fhz (%f): %.5f, %.5f\n", 941.0, coeff(941.0), res, sqrt(res));
-	//fread(buffer, N, sizeof(uint8_t), stdin);
-	//res = goertzel(buffer, coeff(941));
-	//printf("Result: %7.1fhz (%f): %.5f, %.5f\n", 941.0, coeff(941.0), res, sqrt(res));
 }
