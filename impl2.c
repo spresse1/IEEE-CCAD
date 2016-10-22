@@ -48,6 +48,11 @@ mismatches, but nothing significant.
 #include <stdio.h>
 #include <stdint.h>
 #include <errno.h>
+#if _POSIX_C_SOURCE >= 2 || _XOPEN_SOURCE
+#include <unistd.h>
+#else
+#error getopt not supported on this system
+#endif
 
 // All times measured in msec
 #define SAMPLE_RATE			8000 // Hz
@@ -79,11 +84,13 @@ int stored_digit_count = 0;
 
 #define SAMPLE int8_t
 
+#define window(n) (0.54 - 0.46 * cos(2*M_PI*n/N))
+
 float goertzel(SAMPLE *samples, float coeff) {
 	float Q1=0,Q2=0;
 	for (int i=0; i<N; i++) {
 		// Copy variables for cycle
-		float Q0=coeff * Q1 - Q2 + (float)samples[i];
+		float Q0=coeff * Q1 - Q2 + (float)samples[i] * window(i);
 		Q2=Q1;
 		Q1=Q0;
 	}
@@ -109,16 +116,50 @@ float mag2db(float mag) {
 	return 20 * log10(fabs(mag)/32768);
 }
 
+static float DTMF_ROW[4] = { 697, 770, 852, 941 };
+static float DTMF_COL[4] = { 1209, 1336, 1477, 1633 };
+
+static char *DTMF2STR[4][4] = {
+	/* row    { 1209 , 1336, 1477, 1633 },*/
+	/* 697 */ { "1", "2", "3", "A" },
+	/* 770 */ { "4", "5", "6", "B" },
+	/* 852 */ { "7", "8", "9", "C" },
+	/* 941 */ { "*", "0", "#", "D" },
+};
+
+#define THRESH_DB 30
+
+#define LOG_DEFAULT 0
+#define LOG_VERBOSE 1
+#define LOG_DEBUG	2
+
+uint8_t log_level=0;
+
 int main(int argc, char **argv) {
 	printf("Starting with sample rate of %d hz, block size %d\n", SAMPLE_RATE, N);
 	printf("k for 941 is %d, Coeff for 941 is %f\n", k(941), coeff(941));
 	SAMPLE buffer[N];
 	
+	char c;
+	while ((c=getopt(argc, argv, "hdv"))!=-1) {
+		switch (c) {
+			case 'h':
+				exit(0);
+				break;
+			case 'd':
+				log_level=LOG_DEBUG;
+				break;
+			case 'v':
+				log_level=LOG_VERBOSE;
+				break;
+		}
+	}
+	
 	FILE *infile;
-	if (argc==2) {
-		printf("readin file %s\n", argv[1]);
+	if (optind<argc) {
+		printf("readin file %s\n", argv[optind]);
 		errno=0;
-		infile=fopen(argv[1], "r");
+		infile=fopen(argv[optind], "r");
 		if (errno) {
 			perror(NULL);
 			exit(1);
@@ -127,11 +168,21 @@ int main(int argc, char **argv) {
 		printf("Using stdin %d\n", argc);
 		infile=stdin;
 	}
-	
-	fread(buffer, sizeof(SAMPLE), N, infile);
-	for (float i=296; i<=3400; i=i+60) {
-		float res = goertzel(buffer, coeff(i));
-	
-		printf("%f, %.5f, %.5f\n",i, res, mag2db(res));
+		
+	while (fread(buffer, sizeof(SAMPLE), N, infile)>=N) {
+		for (int i=0; i<4; i++) {
+			float res = goertzel(buffer, coeff(DTMF_ROW[i]));
+			if (log_level>LOG_DEBUG) {
+				printf("%f, %.5f, %.5f\n",DTMF_ROW[i], res, mag2db(res));
+			}
+			if (mag2db(res)>THRESH_DB) printf("Detected tone %.1f\n", DTMF_ROW[i]);
+		}
+		for (int i=0; i<4; i++) {
+			float res = goertzel(buffer, coeff(DTMF_COL[i]));
+			if (log_level>LOG_DEBUG) {
+				printf("%f, %.5f, %.5f\n",DTMF_COL[i], res, mag2db(res));
+			}
+			if (mag2db(res)>THRESH_DB) printf("Detected tone %.1f\n", DTMF_COL[i]);
+		}
 	}
 }
