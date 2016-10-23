@@ -123,10 +123,15 @@ char state_to_char(TONESTATE state) {
 #define window(n) 1.0 //(0.54 - 0.46 * cos(2*M_PI*n/N))
 
 /*
-Convert the magnitude output of goertzel into dB (relative to silence).
+Convert the magnitude output of goertzel into dBFS.  dBFS is decibels relative
+to the max output (volume/voltage/whatever) without clipping.  Since we're in
+digital-land, this is easy - the max number that can be stored in the space
+used for a single (audo) sample (eg: 8 bits).
 */
-float mag2db(float mag) {
-	return 20 * log10(fabs(mag)/256);
+float rms2db(float mag) {
+	//RMS power = 0.707 * Peak Power
+	//All our measurements are relative to max RMS power
+	return 20 * log10(fabs(mag)/(powf(2, (sizeof(SAMPLE)*8)-1)*0.707));
 }
 
 /*
@@ -163,8 +168,8 @@ bool has_voice(SAMPLE *sample) {
 	rms_avg = (VAD_DECAY_RATE) * sqrt(res / N) + rms_avg * (1 - VAD_DECAY_RATE);
 	log(LOG_DEBUG, "RMS(sample): %f, RMS(avg):%f\n", sqrt(res / N), rms_avg);
 	log(LOG_DEBUG, "RMS dB: sample: %f, average: %f\n", 
-		mag2db(sqrt(res / N)), mag2db(rms_avg));
-	return (mag2db(rms_avg) > THRESH_VOICE);
+		rms2db(sqrt(res / N)), rms2db(rms_avg));
+	return (rms2db(rms_avg) > THRESH_VOICE);
 }
 
 /*
@@ -193,7 +198,7 @@ computer/mechanically generated tones.
 TONESTATE verify_tones(TONESTATE state, SAMPLE *buffer) {
 	for (int i=0; i<8; i++) {
 		if (TONEISSET(state, i)) {
-			if (mag2db(goertzel(buffer, coeff(DTMF_TONES[i] * 2)))>DB_THRESH_DTMF) {
+			if (rms2db(goertzel(buffer, coeff(DTMF_TONES[i] * 2)))>DB_THRESH_DTMF) {
 				log(LOG_DEBUG, "Clearing tone %f; found 1st harmonic\n",
 					DTMF_TONES[i]);
 				TONECLEAR(state, i);
@@ -349,8 +354,8 @@ int main(int argc, char **argv) {
 		// For this set of samples, check each frequency
 		for (int i=0; i<8; i++) {
 			float res = goertzel(buffer, coeff(DTMF_TONES[i]));
-			log(LOG_DEBUG, "%f, %.5f, %.5f\n", DTMF_TONES[i], res, mag2db(res));
-			if (mag2db(res)>DB_THRESH_DTMF) {
+			log(LOG_DEBUG, "%f, %.5f, %.5f\n", DTMF_TONES[i], res, rms2db(res));
+			if (rms2db(res)>DB_THRESH_DTMF) {
 				log(LOG_DEBUG, "Frequency %.1f detected\n", DTMF_TONES[i]);
 				TONESET(state, i);
 			}
