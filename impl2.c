@@ -16,26 +16,7 @@ It makes the following assumptions:
 
 Item 1 is the one more likely to act as a separator here.
 
-array freq_samples
-silence_time=0
-for each sample:
-	break info frequency bins
-	all_bins_empty=True
-	for each bin:
-		if bin_value is greater than detection threshold and no voice in sample:
-			all_bins_empty=false
-			silence_time=0
-			freq_samples[bin]=MAX_ABSENT_SAMPLES
-		if bin_value is less than detection_threshold and freq_samples[bin]>0:
-			freq_saomples[bin]--;
-		if freq_samples[bin] is zero:
-			store dtmf digit represented by bin
-	if all_bins_empty:
-		silence_time++;
-	if silence_time is greater than maximum silence time or sample contains voice:
-		if stored numbers are valid phone:
-			print stored numbers
-		wipe number store
+[Fill in pseudocode based on actual implementation]
 
 Goertzel Implementaiton based on text of 
 http://www.embedded.com/design/configurable-systems/4024443/The-Goertzel-Algorithm
@@ -78,6 +59,8 @@ Compile as:  cc -g -D_XOPEN_SOURCE=700 -std=c99 -lm -o impl2 impl2.c
 #define LOG_DEBUG	2
 #define log(level, ...) if (log_level>=level) printf(__VA_ARGS__);
 
+uint8_t log_level=0;
+
 #ifndef M_PI
 #define M_PI (3.14159265358979323846)
 #endif
@@ -92,8 +75,10 @@ Compile as:  cc -g -D_XOPEN_SOURCE=700 -std=c99 -lm -o impl2 impl2.c
 #define MAX_INTERDIGIT_TIME	10 * 1000 // milliseconds
 #define MIN_DIGIT_ON_TIME	40 // milliseconds
 #define MAX_DIGIT_INTERRUPT	10 // milliseconds
+#define MIN_VOICE_ON_TIME	1*1000 //milliseconds
 
-#define THRESH_DB 30
+#define DB_THRESH_DTMF 0
+#define THRESH_VOICE -10
 
 // Coefficent (k) calculated from DTMF frequency via k=N(fi/fs), where:
 //  N is the constant filter length
@@ -138,8 +123,18 @@ char state_to_char(TONESTATE state) {
 #define window(n) 1.0 //(0.54 - 0.46 * cos(2*M_PI*n/N))
 
 /*
+Convert the magnitude output of goertzel into dB (relative to silence).
+*/
+float mag2db(float mag) {
+	return 20 * log10(fabs(mag)/256);
+}
+
+/*
 Perform Goertzel algorithm on the specified set of N samples for the coefficient
 passed in.
+sqrt() is in there to scale the value back down to a reasonable range.
+TODO verify that this comment accurately reflects gowertzel output.  In FFT,
+this would likely be scaled by N, right?  Should we be dividing by N?
 */
 float goertzel(SAMPLE *samples, float coeff) {
 	float Q1=0,Q2=0;
@@ -150,17 +145,27 @@ float goertzel(SAMPLE *samples, float coeff) {
 		Q1=Q0;
 	}
 	
-	return Q1*Q1 + Q2*Q2-Q1*Q2*coeff;
+	return sqrt((Q1*Q1 + Q2*Q2-Q1*Q2*coeff)/(N/2));
 }
 
+#define VAD_DECAY_RATE	0.1
+float rms_avg=0;
 /*
-Convert the magnitude output of goertzel into dB (relative to silence).
+Compute RMS of a set of SAMPLEs, then updates the running average.  Returns 
+true if there is sufficient activation to believe there could be voice
+content.
 */
-float mag2db(float mag) {
-	return 20 * log10(fabs(mag)/32768);
+bool has_voice(SAMPLE *sample) {
+	float res=0;
+	for (int i=0; i<N; i++) {
+		res += sample[i] * sample[i];
+	}
+	rms_avg = (VAD_DECAY_RATE) * sqrt(res / N) + rms_avg * (1 - VAD_DECAY_RATE);
+	log(LOG_DEBUG, "RMS(sample): %f, RMS(avg):%f\n", sqrt(res / N), rms_avg);
+	log(LOG_DEBUG, "RMS dB: sample: %f, average: %f\n", 
+		mag2db(sqrt(res / N)), mag2db(rms_avg));
+	return (mag2db(rms_avg) > THRESH_VOICE);
 }
-
-uint8_t log_level=0;
 
 /*
 Wrapper around fread() to prevent partial reads from causing failure, if not at
@@ -188,7 +193,7 @@ computer/mechanically generated tones.
 TONESTATE verify_tones(TONESTATE state, SAMPLE *buffer) {
 	for (int i=0; i<8; i++) {
 		if (TONEISSET(state, i)) {
-			if (mag2db(goertzel(buffer, coeff(DTMF_TONES[i] * 2)))>THRESH_DB) {
+			if (mag2db(goertzel(buffer, coeff(DTMF_TONES[i] * 2)))>DB_THRESH_DTMF) {
 				log(LOG_DEBUG, "Clearing tone %f; found 1st harmonic\n",
 					DTMF_TONES[i]);
 				TONECLEAR(state, i);
@@ -231,6 +236,7 @@ bool verify_state(TONESTATE state) {
 
 float on_time=0;
 float off_time=0;
+float voice_time=0;
 char on_char='\0';
 bool emitted=false;
 
@@ -243,7 +249,7 @@ void emit(char x){
 			log(LOG_VERBOSE, "%c: Active: %f, silent: %f\n", x, on_time, 
 				off_time);
 		} else {
-			printf("%c", on_char);
+			printf("%c", x);
 		}
 		emitted=true;
 	}
@@ -256,6 +262,7 @@ void reset(void) {
 	on_char='\0';
 	on_time=0;
 	off_time=0;
+	voice_time=0;
 	emitted=false;
 }
 
@@ -263,7 +270,15 @@ void reset(void) {
 Called if the sample does not have a DTMF tone in it.  Resets, emits if long
 enough apart we're sure the tone is done.
 */
-void is_off() {
+void is_off(SAMPLE *buffer) {
+	if (has_voice(buffer)) {
+		log(LOG_VERBOSE, "Voice detected\n");
+		voice_time += SAMPLE_LENGTH;
+		log(LOG_VERBOSE, "Voice on time: %f\n", voice_time);
+		if (voice_time>MIN_VOICE_ON_TIME) {
+			emit('.');
+		}
+	}
 	off_time += SAMPLE_LENGTH;
 	if (on_char!='\0' && off_time>MAX_DIGIT_INTERRUPT) {
 		//Digit just timed out.
@@ -335,7 +350,7 @@ int main(int argc, char **argv) {
 		for (int i=0; i<8; i++) {
 			float res = goertzel(buffer, coeff(DTMF_TONES[i]));
 			log(LOG_DEBUG, "%f, %.5f, %.5f\n", DTMF_TONES[i], res, mag2db(res));
-			if (mag2db(res)>THRESH_DB) {
+			if (mag2db(res)>DB_THRESH_DTMF) {
 				log(LOG_DEBUG, "Frequency %.1f detected\n", DTMF_TONES[i]);
 				TONESET(state, i);
 			}
@@ -350,10 +365,10 @@ int main(int argc, char **argv) {
 				log(LOG_DEBUG,"Detected DTMF \"%c\"\n", state_to_char(state));
 				is_on(state_to_char(state));
 			} else {
-				is_off();
+				is_off(buffer);
 			}
 		} else {
-			is_off();
+			is_off(buffer);
 		}
 	}
 	printf("\n");
