@@ -57,9 +57,11 @@ Compile as:  cc -g -D_XOPEN_SOURCE=700 -std=c99 -lm -o impl2 impl2.c
 #define LOG_DEFAULT 0
 #define LOG_VERBOSE 1
 #define LOG_DEBUG	2
-#define log(level, ...) if (log_level>=level) printf(__VA_ARGS__);
+#define log(level, ...) if (log_level>=level) fprintf(log_output_file, __VA_ARGS__);
+
 
 uint8_t log_level=0;
+FILE *log_output_file;
 
 #ifndef M_PI
 #define M_PI (3.14159265358979323846)
@@ -219,7 +221,7 @@ bool verify_state(TONESTATE state) {
 	log(LOG_DEBUG, "%s: lower: 0x%2x\n", __func__, lower);
 	// Check 1: Bits set in both upper and lower
 	if (upper==0 || lower==0) {
-		log(LOG_VERBOSE, 
+		log(LOG_DEBUG, 
 			"Rejected state; not tones in both upper & lower ranges\n");
 		return false;
 	}
@@ -232,7 +234,7 @@ bool verify_state(TONESTATE state) {
 	log(LOG_DEBUG, "%s: lower: 0x%2x\n", __func__, lower);
 	
 	if (upper!=0 || lower!=0) {
-		log(LOG_VERBOSE, "Rejected state; too many bits set\n");
+		log(LOG_DEBUG, "Rejected state; too many bits set\n");
 		return false;
 	}
 	
@@ -250,10 +252,9 @@ Manages printing of result chars so they only get ptinted once per instance.
 */
 void emit(char x){
 	if (!emitted) {
-		if (log_level>=LOG_VERBOSE) {
-			log(LOG_VERBOSE, "%c: Active: %f, silent: %f\n", x, on_time, 
-				off_time);
-		} else {
+		log(LOG_VERBOSE, "%c: Active: %f, silent: %f, voice: %f\n", x, on_time, 
+				off_time, voice_time);
+		if (log_level<LOG_VERBOSE || log_output_file!=stdout) {
 			printf("%c", x);
 		}
 		emitted=true;
@@ -277,9 +278,9 @@ enough apart we're sure the tone is done.
 */
 void is_off(SAMPLE *buffer) {
 	if (has_voice(buffer)) {
-		log(LOG_VERBOSE, "Voice detected\n");
+		log(LOG_DEBUG, "Voice detected\n");
 		voice_time += SAMPLE_LENGTH;
-		log(LOG_VERBOSE, "Voice on time: %f\n", voice_time);
+		log(LOG_DEBUG, "Voice on time: %f\n", voice_time);
 		if (voice_time>MIN_VOICE_ON_TIME) {
 			emit('.');
 		}
@@ -315,9 +316,9 @@ void is_on(char c) {
 
 int main(int argc, char **argv) {
 	SAMPLE buffer[N];
-	
+	log_output_file=stdout;
 	char c;
-	while ((c=getopt(argc, argv, "hdv"))!=-1) {
+	while ((c=getopt(argc, argv, "hdv2"))!=-1) {
 		switch (c) {
 			case 'h':
 				exit(0);
@@ -327,6 +328,9 @@ int main(int argc, char **argv) {
 				break;
 			case 'v':
 				log_level=LOG_VERBOSE;
+				break;
+			case '2':
+				log_output_file=stderr;
 				break;
 		}
 	}
