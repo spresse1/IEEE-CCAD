@@ -77,8 +77,8 @@ uint8_t log_level=0;
 #define MAX_DIGIT_INTERRUPT	10 // milliseconds
 #define MIN_VOICE_ON_TIME	1*1000 //milliseconds
 
-#define DB_THRESH_DTMF 0
-#define THRESH_VOICE -10
+#define DB_THRESH_DTMF 10
+#define THRESH_VOICE -20
 
 // Coefficent (k) calculated from DTMF frequency via k=N(fi/fs), where:
 //  N is the constant filter length
@@ -138,7 +138,7 @@ float rms2db(float mag) {
 Perform Goertzel algorithm on the specified set of N samples for the coefficient
 passed in.
 sqrt() is in there to scale the value back down to a reasonable range.
-TODO verify that this comment accurately reflects gowertzel output.  In FFT,
+TODO verify that this comment accurately reflects Goertzel output.  In FFT,
 this would likely be scaled by N, right?  Should we be dividing by N?
 */
 float goertzel(SAMPLE *samples, float coeff) {
@@ -150,7 +150,7 @@ float goertzel(SAMPLE *samples, float coeff) {
 		Q1=Q0;
 	}
 	
-	return sqrt((Q1*Q1 + Q2*Q2-Q1*Q2*coeff)/(N/2));
+	return sqrtf((Q1*Q1 + Q2*Q2-Q1*Q2*coeff)/(N/2));
 }
 
 #define VAD_DECAY_RATE	0.1
