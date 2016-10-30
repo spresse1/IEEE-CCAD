@@ -7,6 +7,7 @@ import sys
 from os import stat, mkdir
 import os.path
 import subprocess
+import multiprocessing
 
 SAMPLE_RATE=8000
 BITS=8
@@ -45,7 +46,7 @@ class DTMFTest:
 			digit = randint(0,15)
 			time = randint(40,1000)
 			interdigit_time = randint(40,1000)
-			contentfile.write("DTMF: %dms silence\n" % interdigit_time)
+			
 			contentfile.write("DTMF: %s for %dms\n" %
 				(TONES[digit][0], time))
 			# 40-1000 ms of tone
@@ -53,6 +54,7 @@ class DTMFTest:
 			# 40+ ms post-digit silence
 			for i in range(0, int(interdigit_time/1000.0 * SAMPLE_RATE)):
 				outfile.write(pack('b', 0)[0])
+			contentfile.write("DTMF: %dms silence\n" % interdigit_time)
 			string+=TONES[digit][0]
 		return (string, interdigit_time)
 
@@ -71,10 +73,7 @@ class DTMFTest:
 				)[0])
 		
 	# Takes file name, returns ms audio included from that file
-	def include_file_part(self, outfile, infile):
-		stats = stat(infile)
-		start = randint(0, stats.st_size)
-		length = randint(0, stats.st_size-start)
+	def include_file_part(self, outfile, infile, start, length):
 		with open(infile, 'r') as fileH:
 			fileH.seek(start, 0)
 			content = fileH.read(length)
@@ -83,8 +82,8 @@ class DTMFTest:
 		return len(content) * 1000.0 / SAMPLE_RATE
 
 	def make_file(self, outfilename, outverbose):
-		running_non_dtmf=0
-		running_voice=0
+		running_non_dtmf=0.0
+		running_voice=0.0
 		string=""
 		#with open(outfilename, 'wb') as outfile:
 		#	with open(outverbose, 'w') as contentfile:
@@ -97,18 +96,32 @@ class DTMFTest:
 			elif (action<=4):
 				out = self.create_dtmf(outfile, contentfile)
 				string += out[0]
-				running_voice=0
-				running_non_dtmf=out[1]
+				running_voice=0.0
+				running_non_dtmf=float(out[1])
 			elif (action<=8):
 				infile = voice[randint(0,len(voice)-1)]
-				length = self.include_file_part(outfile, infile)
+				stats = stat(infile)
+				start = randint(0, stats.st_size)
+				length = randint(0, stats.st_size-start)
+				runtime = length * 1000.0 / SAMPLE_RATE
+				if runtime>MIN_VOICE_ON_TIME and runtime<MIN_VOICE_ON_TIME+1000:
+					length -= SAMPLE_RATE / 10 # Remove 100ms audio
+					# We do this because voice files may not be perfectly
+					# created to start and stop just on time or may contain
+					# short silences.  These input errors cascade into
+					# significant errors in later tests.
+
+				length = self.include_file_part(outfile, infile, start, length)
 				running_voice += length
 				running_non_dtmf += length
 				contentfile.write("Voice: %dms of %s\n" % ( length , infile))
 			else:
-				running_voice=0
+				running_voice=0.0
 				infile = noise[randint(0,len(noise)-1)]
-				length = self.include_file_part(outfile, infile)
+				stats = stat(infile)
+				start = randint(0, stats.st_size)
+				length = randint(0, stats.st_size-start)
+				length = self.include_file_part(outfile, infile, start, length)
 				running_non_dtmf += length		
 				contentfile.write("Noise: %dms of %s\n" % ( length , infile))
 			if running_non_dtmf>MAX_INTERDIGIT_TIME and (not string or
@@ -143,7 +156,16 @@ def call_test_bin(outdir, testpath, infile, expected):
 		print res.output
 		exit(1)
 	return output==expected
-	
+
+def single_test(testnum, voice, noise):
+	testgen = DTMFTest(voice, noise)
+	testpath = os.path.join(outdir, "test%d" % testnum)
+	knownres = testgen.make_file(testpath + ".raw", testpath + ".content")
+	if call_test_bin(outdir, testpath, testpath+".raw", knownres):
+		return True
+	else:
+		return testnum
+
 if __name__=="__main__":
 	found_sep=False
 	voice=[]
@@ -173,16 +195,19 @@ if __name__=="__main__":
 	except OSError:
 		print "Output directory " + outdir + " exists"
 		
-	testgen = DTMFTest(voice, noise)
 	successes=0
 	failed=[]
-	for testnum in range(0, count):
-		testpath = os.path.join(outdir, "test%d" % testnum)
-		knownres = testgen.make_file(testpath + ".raw", testpath + ".content")
-		if call_test_bin(outdir, testpath, testpath+".raw", knownres):
+	pool = multiprocessing.Pool()
+	res = []
+	for x in range(count):
+		res += [ pool.apply_async(single_test, (x, voice, noise))]
+	for i in res:
+		value = i.get()
+		if value is True:
 			successes+=1
 		else:
-			failed+=[ testnum ]
+			print value
+			failed += [ value ]
 	print "%d/%d tests passed (%.1f%%)" % (successes, count, 
 		(float(successes)/count)*100.0)
 	print "Failed tests are:"
