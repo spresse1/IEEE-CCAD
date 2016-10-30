@@ -7,7 +7,7 @@ import sys
 from os import stat, mkdir
 import os.path
 import subprocess
-
+import multiprocessing
 
 SAMPLE_RATE=8000
 BITS=8
@@ -156,7 +156,17 @@ def call_test_bin(outdir, testpath, infile, expected):
 		print res.output
 		exit(1)
 	return output==expected
-	
+
+def single_test(inputdata):
+	(testnum, voice, noise) = inputdata
+	testgen = DTMFTest(voice, noise)
+	testpath = os.path.join(outdir, "test%d" % testnum)
+	knownres = testgen.make_file(testpath + ".raw", testpath + ".content")
+	if call_test_bin(outdir, testpath, testpath+".raw", knownres):
+		return True
+	else:
+		return testnum
+
 if __name__=="__main__":
 	found_sep=False
 	voice=[]
@@ -186,16 +196,16 @@ if __name__=="__main__":
 	except OSError:
 		print "Output directory " + outdir + " exists"
 		
-	testgen = DTMFTest(voice, noise)
 	successes=0
 	failed=[]
-	for testnum in range(0, count):
-		testpath = os.path.join(outdir, "test%d" % testnum)
-		knownres = testgen.make_file(testpath + ".raw", testpath + ".content")
-		if call_test_bin(outdir, testpath, testpath+".raw", knownres):
+	pool = multiprocessing.Pool()
+	res = pool.map(single_test, [(x, voice, noise) for x in range(count)])
+	for i in res:
+		if i is True:
 			successes+=1
 		else:
-			failed+=[ testnum ]
+			#print i
+			failed += [ i ]
 	print "%d/%d tests passed (%.1f%%)" % (successes, count, 
 		(float(successes)/count)*100.0)
 	print "Failed tests are:"
