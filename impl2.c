@@ -80,7 +80,7 @@ FILE *log_output_file;
 #define MIN_VOICE_ON_TIME	1*1000 //milliseconds
 
 #define DB_THRESH_DTMF 10
-#define THRESH_VOICE -25
+#define THRESH_VOICE -23
 
 // Coefficent (k) calculated from DTMF frequency via k=N(fi/fs), where:
 //  N is the constant filter length
