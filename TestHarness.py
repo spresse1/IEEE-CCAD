@@ -183,10 +183,10 @@ class DTMFTestType2(DTMFTest):
 				time=0.0
 				running_non_dtmf=float(out[1])
 				if randint(0,1)==0:
-					while time < MIN_VOICE_ON_TIME + 1000:
+					while time < MIN_VOICE_ON_TIME:
 						time += self.make_segment("Voice", self.voice, time, MIN_VOICE_ON_TIME, outfile, contentfile)
 				else:
-					while time < MAX_INTERDIGIT_TIME + 5000:
+					while time < MAX_INTERDIGIT_TIME:
 						time += self.make_segment("Noise", self.noise, 
 							time, MAX_INTERDIGIT_TIME, outfile, contentfile)
 				if not string or string[-1]!=".":
