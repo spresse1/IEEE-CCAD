@@ -4,7 +4,8 @@ from random import randint
 from math import sin, pi
 from struct import pack
 import sys
-from os import stat, mkdir
+import re
+from os import stat, makedirs
 import os.path
 import subprocess
 import multiprocessing
@@ -14,6 +15,8 @@ BITS=8
 MIN_VOICE_ON_TIME=1000
 MAX_INTERDIGIT_TIME=10 * 1000
 INPUT_COMP_TIME=0
+
+VALID_NUMBER_RE = re.compile("^[1]{0,1}([2-9][0-9]{9})[#]{0,1}$")
 
 TONES= (
 	("1", 697, 1209),
@@ -41,16 +44,22 @@ def ms2samples(ms):
 	return int(ms / 1000.0 * SAMPLE_RATE)
 
 class DTMFTest:	
-	def __init__(self, voice_files, noise_files):
+	def __init__(self, voice_files, noise_files, restrict=False, endpound=False):
 		self.voice = voice_files
 		self.noise = noise_files
+		self.restrict = restrict
+		self.endpound = endpound
 	
-	def create_dtmf(self, outfile, contentfile, restrict=False, endinpound=False):
-		length = randint(1,16)
+	def create_dtmf(self, outfile, contentfile):
+		length = randint(1,17)
 		string=""
 		while (length>0):
 			length-=1
 			digit = randint(0,15)
+			while self.restrict and digit in [ 3, 7, 11, 12, 14, 15 ]:
+				digit = randint(0,15)
+			if length==0 and self.endpound==True and randint(0,1)==1:
+				digit = 14 # pound
 			time = randint(40,1000)
 			interdigit_time = randint(40,1000)
 			
@@ -150,6 +159,8 @@ class DTMFTest:
 				# If on long enough to be voice content and previous output
 				# wasn't also a separator:
 				string+="."
+		string += "."
+		contentfile.write("Symbol stream is: %s\n" % (string))
 		outfile.close()
 		contentfile.close()
 	
@@ -172,14 +183,16 @@ class DTMFTestType2(DTMFTest):
 				time=0.0
 				running_non_dtmf=float(out[1])
 				if randint(0,1)==0:
-					while time < MIN_VOICE_ON_TIME:
+					while time < MIN_VOICE_ON_TIME + 1000:
 						time += self.make_segment("Voice", self.voice, time, MIN_VOICE_ON_TIME, outfile, contentfile)
 				else:
-					while time < MAX_INTERDIGIT_TIME:
+					while time < MAX_INTERDIGIT_TIME + 5000:
 						time += self.make_segment("Noise", self.noise, 
 							time, MAX_INTERDIGIT_TIME, outfile, contentfile)
 				if not string or string[-1]!=".":
 					string+="."
+		string += "."
+		contentfile.write("Symbol stream is: %s\n" % (string))
 		outfile.close()
 		contentfile.close()
 		return string
@@ -199,38 +212,53 @@ class DTMFTestType2(DTMFTest):
 
 BINFILE="./impl2"
 	
-def call_test_bin(outdir, testpath, infile, expected):
-	errfile = open(testpath + ".output", 'w')
+def call_test_bin(infile, errfile):
 	res = subprocess.Popen( [ str(BINFILE), "-v", "-2", str(infile) ], 
 		stdout=subprocess.PIPE, stderr=errfile)
 	res.wait()
 	output = res.stdout.read().strip()
-	errfile.write("Expected: %s\n" % expected)
-	errfile.write("Got:      %s\n" % output)
-	errfile.flush()
-	errfile.close()
 	if res.returncode!=0:
 		print "Processes under test returned non-zero code %d" % res.returncode
 		print res.output
 		exit(1)
-	return output==expected
+	return output
 
-def single_test(inputdata):
+def single_test_type1(inputdata):
 	(testnum, voice, noise) = inputdata
 	testgen = DTMFTest(voice, noise)
-	testpath = os.path.join(outdir, "test%d" % testnum)
+	testpath = os.path.join(outdir, "type1", "test%d" % testnum)
 	knownres = testgen.make_file(testpath + ".raw", testpath + ".content")
-	if call_test_bin(outdir, testpath, testpath+".raw", knownres):
+	errfile = open(testpath + ".output", 'w')
+	res = call_test_bin(testpath+".raw", errfile)
+	errfile.write("Expected: %s\n" % knownres)
+	errfile.write("Got:      %s\n" % res)
+	errfile.flush()
+	errfile.close()
+	if res.split("\n")[0]==knownres:
 		return True
 	else:
 		return testnum
 
 def single_test_type2(inputdata):
 	(testnum, voice, noise) = inputdata
-	testgen = DTMFTestType2(voice, noise)
-	testpath = os.path.join(outdir, "testt2%d" % testnum)
-	knownres = testgen.make_file(testpath + ".raw", testpath + ".content")
-	if call_test_bin(outdir, testpath, testpath+".raw", knownres):
+	testgen = DTMFTestType2(voice, noise, restrict=True, endpound=True)
+	testpath = os.path.join(outdir, "type2", "test%d" % testnum)
+	symstream = testgen.make_file(testpath + ".raw", testpath + ".content")
+	knownres = [ VALID_NUMBER_RE.match(x).group(1) for x in symstream.split(".") 
+		if VALID_NUMBER_RE.match(x) ] # Eliminates all non-matching entries
+	errfile = open(testpath + ".output", 'w')
+	res = call_test_bin(testpath+".raw", errfile).split("\n")
+	outsym = res[0]
+	res = res[1:]
+	res.sort()
+	knownres.sort()
+	errfile.write("Symstream: %s\n" % symstream)
+	errfile.write("As read:   %s\n" % outsym)
+	errfile.write("Expected: %s\n" % knownres)
+	errfile.write("Got:      %s\n" % res)
+	errfile.flush()
+	errfile.close()
+	if res==knownres:
 		return True
 	else:
 		return testnum
@@ -240,8 +268,9 @@ if __name__=="__main__":
 	voice=[]
 	noise=[]
 	outdir = sys.argv[1]
-	count = int(sys.argv[2])
-	for file in sys.argv[3:]:
+	ttype = sys.argv[2]
+	count = int(sys.argv[3])
+	for file in sys.argv[4:]:
 		if not found_sep and file!="--":
 			#sys.stderr.write("Added %s to voice\n" % file)
 			voice += [file]
@@ -254,43 +283,58 @@ if __name__=="__main__":
 	if voice==[] or noise==[]:
 		print("Must provide both voice and noise files. Separate with --")
 		exit(1)
+	
+	if ttype not in ["1", "2", "both"]:
+		print "Test type must be one of 1, 2, or both"
+		exit(1)
 
 	print(voice)
 	print(noise)
 
-	try:
-		mkdir(outdir)
-		print "Created output directory " + outdir
-	except OSError:
-		print "Output directory " + outdir + " exists"
-		
 	successes=0
 	failed=[]
 	pool = multiprocessing.Pool()
-	res = pool.map(single_test, [(x, voice, noise) for x in range(count)])
-	for i in res:
-		if i is True:
-			successes+=1
-		else:
-			#print i
-			failed += [ i ]
-	print "Type 1 test: %d/%d tests passed (%.1f%%)" % (successes, count, 
-		(float(successes)/count)*100.0)
-	print "Failed tests are:"
-	print failed
 	
-	# Now do type 2 tests
-	successes=0
-	failed=[]
-	pool = multiprocessing.Pool()
-	res = pool.map(single_test_type2, [(x, voice, noise) for x in range(count)])
-	for i in res:
-		if i is True:
-			successes+=1
-		else:
-			#print i
-			failed += [ i ]
-	print "Type 2 test: %d/%d tests passed (%.1f%%)" % (successes, count, 
-		(float(successes)/count)*100.0)
-	print "Failed tests are:"
-	print failed
+	if ttype == "1" or ttype=="both":
+		newdir = os.path.join(outdir, "type1")
+		try:
+			makedirs(newdir)
+			print "Created output directory " + newdir
+		except OSError:
+			print "Output directory " + newdir + " exists"
+			
+		res = pool.map(single_test_type1, [(x, voice, noise) for x in range(count)])
+		for i in res:
+			if i is True:
+				successes+=1
+			else:
+				#print i
+				failed += [ i ]
+		print "Type 1 test: %d/%d tests passed (%.1f%%)" % (successes, count, 
+			(float(successes)/count)*100.0)
+		print "Failed tests are:"
+		print failed
+	
+	if ttype == "2" or ttype=="both":
+		newdir = os.path.join(outdir, "type2")
+		try:
+			makedirs(newdir)
+			print "Created output directory " + newdir
+		except OSError:
+			print "Output directory " + newdir + " exists"
+		
+		# Now do type 2 tests
+		successes=0
+		failed=[]
+		pool = multiprocessing.Pool()
+		res = pool.map(single_test_type2, [(x, voice, noise) for x in range(count)])
+		for i in res:
+			if i is True:
+				successes+=1
+			else:
+				#print i
+				failed += [ i ]
+		print "Type 2 test: %d/%d tests passed (%.1f%%)" % (successes, count, 
+			(float(successes)/count)*100.0)
+		print "Failed tests are:"
+		print failed
