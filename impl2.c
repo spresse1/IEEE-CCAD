@@ -362,8 +362,6 @@ void stage1(FILE *infile) {
 			is_off(buffer);
 		}
 	}
-	printf("\n");
-
 }
 
 /*
@@ -389,12 +387,16 @@ char *validate_num(char *buffer) {
 			} else { // empty buffer and not 1 or 2-9 means invalid number
 				break; // Move to next possible number
 			}
+		} else if(pos==0 && (*buffer=='1' || *buffer=='0')) {
+			// NANP numbers may not start with 0 or 1 and this is not positioned
+			// so it could be the long-distance 1.  Invalid number
+			break;
 		} else if (pos==10 && *buffer=='#' && buffer[1]=='.') {
 				// If we have 10 digits and are looking at a separator or a #
 				// followed by a separator:
 			buffer++; // move on to the .
 			break;
-		} else {
+		}else {
 			if (pos <10 && *buffer>='0' && *buffer<='9') {
 				// not the first pos and not a full 10 digits and looking at 0-9
 				// -> add to buffer and move on
@@ -474,6 +476,7 @@ int main(int argc, char **argv) {
 	// Make the symbol buffer end in a .
 	reset();
 	emit('.');
+	printf("\n"); //Separate stage1 output from stage2
 	
 	//Stage 2 processing
 	stage2();
