@@ -40,6 +40,7 @@ Compile as:  cc -g -D_XOPEN_SOURCE=700 -std=c99 -lm -o impl2 impl2.c
 #include <stdint.h>
 #include <stdbool.h>
 #include <errno.h>
+#include <string.h>
 #if _POSIX_C_SOURCE >= 2 || _XOPEN_SOURCE
 #include <unistd.h>
 #else
@@ -77,7 +78,7 @@ FILE *log_output_file;
 #define MAX_INTERDIGIT_TIME	10 * 1000 // milliseconds
 #define MIN_DIGIT_ON_TIME	40 // milliseconds
 #define MAX_DIGIT_INTERRUPT	10 // milliseconds
-#define MIN_VOICE_ON_TIME	1*1000 //milliseconds
+#define MIN_VOICE_ON_TIME	1*1000 - 0*SAMPLE_LENGTH//milliseconds
 
 #define DB_THRESH_DTMF 10
 #define THRESH_VOICE -23
@@ -108,6 +109,12 @@ static char DTMF2CHAR[5][5] = {
 	/* 852 */ { ' ', '7', '8', '9', 'C' },
 	/* 941 */ { ' ', '*', '0', '#', 'D' },
 };
+
+#define SYMBOL_BUFFER_UNIT_SIZE	1
+
+char *symbol_buffer;
+int symbol_buffer_length=SYMBOL_BUFFER_UNIT_SIZE;
+int symbol_buffer_used=0;
 
 /*
 Convert a TONESTATE to the human-readable character-equivalent.
@@ -257,6 +264,16 @@ void emit(char x){
 		if (log_level<LOG_VERBOSE || log_output_file!=stdout) {
 			printf("%c", x);
 		}
+		// Now symbol buffer stuff
+		symbol_buffer[symbol_buffer_used] = x;
+		symbol_buffer_used++;
+		if (symbol_buffer_used >= symbol_buffer_length) {
+			symbol_buffer = realloc(symbol_buffer, 
+				symbol_buffer_length + SYMBOL_BUFFER_UNIT_SIZE);
+			memset(symbol_buffer+symbol_buffer_used, 0, 
+				SYMBOL_BUFFER_UNIT_SIZE);
+			symbol_buffer_length+=SYMBOL_BUFFER_UNIT_SIZE;
+		}
 		emitted=true;
 	}
 }
@@ -314,8 +331,107 @@ void is_on(char c) {
 	if (on_time>MIN_DIGIT_ON_TIME) emit(on_char);
 }
 
-int main(int argc, char **argv) {
+/* Stage 1 - filter audio into asymbol stream */
+void stage1(FILE *infile) {	
 	SAMPLE buffer[N];
+	while (read_file(buffer, infile)) {
+		TONESTATE state = 0;
+		
+		// For this set of samples, check each frequency
+		for (int i=0; i<8; i++) {
+			float res = goertzel(buffer, coeff(DTMF_TONES[i]));
+			log(LOG_DEBUG, "%f, %.5f, %.5f\n", DTMF_TONES[i], res, rms2db(res));
+			if (rms2db(res)>DB_THRESH_DTMF) {
+				log(LOG_DEBUG, "Frequency %.1f detected\n", DTMF_TONES[i]);
+				TONESET(state, i);
+			}
+		}
+		
+		if (state) {
+			// First tone filtering:
+			state = verify_tones(state, buffer);
+			// Second "logical filtering"
+			if (verify_state(state)) {
+				//Third, it's valid
+				log(LOG_DEBUG,"Detected DTMF \"%c\"\n", state_to_char(state));
+				is_on(state_to_char(state));
+			} else {
+				is_off(buffer);
+			}
+		} else {
+			is_off(buffer);
+		}
+	}
+	printf("\n");
+
+}
+
+/*
+Given a pointer to a string, this function operates on the string to determine
+if it contains a valid NANP number.  When it returns, retuns a pointer 
+gurantted to be pointing at either . or \0
+*/
+char *validate_num(char *buffer) {
+	char *start = buffer;
+	char pot_num[15] = {0};
+	int pos=0;
+	
+	// While not at a separator
+	while (*buffer!='.') {
+		if (pos==0 && start==buffer) { //if we haven't examined any digits...
+			if (*buffer=='1') { // and we're looking at at 1
+				buffer++; //move to the next entry
+				continue; // and the next interation
+			} else if (*buffer>='2' && *buffer<='9') { // and we're looking at 
+													   // 2-9
+				pot_num[pos] = *buffer; // record the entry
+				pos++;
+			} else { // empty buffer and not 1 or 2-9 means invalid number
+				break; // Move to next possible number
+			}
+		} else if (pos==10 && *buffer=='#' && buffer[1]=='.') {
+				// If we have 10 digits and are looking at a separator or a #
+				// followed by a separator:
+			buffer++; // move on to the .
+			break;
+		} else {
+			if (pos <10 && *buffer>='0' && *buffer<='9') {
+				// not the first pos and not a full 10 digits and looking at 0-9
+				// -> add to buffer and move on
+				pot_num[pos] = *buffer;
+				pos++;
+			} else {
+				break; // Fell through somehow.  Too many digits or one that 
+					   // isn't 0-9
+			}
+		}
+		// Move to the next character
+		buffer++;
+	}
+	
+	if (pos==10 && *buffer=='.') {
+		pot_num[pos]='\0'; //end of string
+		printf("%s\n", pot_num); // Print as a valid result
+	}
+	
+	// If we got here, we're either ready to move on or need to read until
+	// ready to move on
+	while (*buffer!=0 && *buffer!='.') {
+		buffer++;
+	}
+	return buffer;
+}
+
+/* Filter stage 2 - parse symbol stream for "aceptable" formats. */
+void stage2(void) {
+	char *buffer = symbol_buffer;
+	while (*buffer!='\0') {
+		buffer = validate_num(buffer) + 1;
+	}
+}
+
+int main(int argc, char **argv) {
+	symbol_buffer = calloc(symbol_buffer_length, sizeof(char));
 	log_output_file=stdout;
 	char c;
 	while ((c=getopt(argc, argv, "hdv2"))!=-1) {
@@ -352,33 +468,17 @@ int main(int argc, char **argv) {
 		infile=stdin;
 	}
 	
-	while (read_file(buffer, infile)) {
-		TONESTATE state = 0;
-		
-		// For this set of samples, check each frequency
-		for (int i=0; i<8; i++) {
-			float res = goertzel(buffer, coeff(DTMF_TONES[i]));
-			log(LOG_DEBUG, "%f, %.5f, %.5f\n", DTMF_TONES[i], res, rms2db(res));
-			if (rms2db(res)>DB_THRESH_DTMF) {
-				log(LOG_DEBUG, "Frequency %.1f detected\n", DTMF_TONES[i]);
-				TONESET(state, i);
-			}
-		}
-		
-		if (state) {
-			// First tone filtering:
-			state = verify_tones(state, buffer);
-			// Second "logical filtering"
-			if (verify_state(state)) {
-				//Third, it's valid
-				log(LOG_DEBUG,"Detected DTMF \"%c\"\n", state_to_char(state));
-				is_on(state_to_char(state));
-			} else {
-				is_off(buffer);
-			}
-		} else {
-			is_off(buffer);
-		}
-	}
-	printf("\n");
+	// Stage 1 processing
+	stage1(infile);
+	
+	// Make the symbol buffer end in a .
+	reset();
+	emit('.');
+	
+	//Stage 2 processing
+	stage2();
+	
+	//cleanup
+	free(symbol_buffer);
+	if (infile!=stdin) fclose(infile);
 }
