@@ -184,7 +184,7 @@ float goertzel(SAMPLE * samples, float coeff)
 	float Q1 = 0, Q2 = 0;
 	for (int i = 0; i < N; i++) {
 		// Copy variables for cycle
-		float Q0 = coeff * Q1 - Q2 + (float)samples[i] * i;
+		float Q0 = coeff * Q1 - Q2 + (float)samples[i];
 		Q2 = Q1;
 		Q1 = Q0;
 	}
