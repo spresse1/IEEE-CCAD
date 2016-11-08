@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 
-from random import randint
+from random import randint, seed
 from math import sin, pi
 from struct import pack
 import sys
@@ -104,7 +104,7 @@ class DTMFTest:
                      outfile, contentfile):
         infile = files[randint(0, len(files) - 1)]
         stats = stat(infile)
-        start = randint(0, stats.st_size)
+        start = 0 #randint(0, stats.st_size)
         length = randint(0, stats.st_size - start)
         if previous_runtime + samples2ms(length) > runtime_threshhold - \
             INPUT_COMP_TIME and previous_runtime + samples2ms(length) < \
@@ -210,7 +210,7 @@ class DTMFTestType2(DTMFTest):
                      outfile, contentfile):
         infile = files[randint(0, len(files) - 1)]
         stats = stat(infile)
-        start = randint(0, stats.st_size)
+        start = 0 #randint(0, stats.st_size)
         length = randint(0, stats.st_size - start)
         if previous_runtime + samples2ms(length) > runtime_threshhold - \
             INPUT_COMP_TIME and previous_runtime + samples2ms(length) < \
@@ -239,6 +239,7 @@ def call_test_bin(infile, errfile):
 
 def single_test_type1(inputdata):
     (testnum, voice, noise) = inputdata
+    seed(testnum)
     testgen = DTMFTest(voice, noise)
     testpath = os.path.join(outdir, "type1", "test%d" % testnum)
     knownres = testgen.make_file(testpath + ".raw", testpath + ".content")
@@ -256,6 +257,7 @@ def single_test_type1(inputdata):
 
 def single_test_type2(inputdata):
     (testnum, voice, noise) = inputdata
+    seed(testnum)
     testgen = DTMFTestType2(voice, noise, restrict=True, endpound=True)
     testpath = os.path.join(outdir, "type2", "test%d" % testnum)
     symstream = testgen.make_file(testpath + ".raw", testpath + ".content")
@@ -300,8 +302,8 @@ if __name__ == "__main__":
         print "Test type must be one of 1, 2, or both"
         exit(1)
 
-    print(voice)
-    print(noise)
+    #print(voice)
+    #print(noise)
 
     successes = 0
     failed = []

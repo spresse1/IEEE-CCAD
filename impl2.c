@@ -113,7 +113,7 @@ FILE *log_output_file;
 #define MIN_VOICE_ON_TIME	1*1000 - 0*SAMPLE_LENGTH	//milliseconds
 
 #define THRESH_DTMF 10
-#define THRESH_VOICE -23
+#define THRESH_VOICE -25 //-25 for wavs and white noise, -37 for wavs & silence
 
 // Coefficient (k) calculated from DTMF frequency via k=N(fi/fs), where:
 //  N is the constant filter length
@@ -192,7 +192,7 @@ float goertzel(SAMPLE * samples, float coeff)
 	return sqrtf((Q1 * Q1 + Q2 * Q2 - Q1 * Q2 * coeff) / (N / 2));
 }
 
-#define VAD_DECAY_RATE	0.1
+#define VAD_DECAY_RATE	0.37 //0.37 for wavs and noise, wavs and silence
 float rms_avg = 0;
 /*
 Compute RMS of a set of SAMPLEs, then updates the running average.  Returns 
