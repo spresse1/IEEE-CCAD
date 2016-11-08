@@ -3,12 +3,14 @@
 from random import randint, seed
 from math import sin, pi
 from struct import pack
+from time import time
 import sys
 import re
 from os import stat, makedirs
 import os.path
 import subprocess
 import multiprocessing
+import argparse
 
 SAMPLE_RATE = 8000
 BITS = 8
@@ -166,7 +168,7 @@ class DTMFTest:
                 # wasn't also a separator:
                 string += "."
         string += "."
-        contentfile.write("Symbol stream is: %s\n" % (string))
+        contentfile.write("Symbol stream is:\n%s\n" % (string))
         outfile.close()
         contentfile.close()
 
@@ -201,7 +203,7 @@ class DTMFTestType2(DTMFTest):
                 if not string or string[-1] != ".":
                     string += "."
         string += "."
-        contentfile.write("Symbol stream is: %s\n" % (string))
+        contentfile.write("Symbol stream is:\n%s\n" % (string))
         outfile.close()
         contentfile.close()
         return string
@@ -236,13 +238,20 @@ def call_test_bin(infile, errfile):
         exit(1)
     return output
 
+def get_symstream(testpath):
+    with open(testpath + ".content") as f:
+        contents = f.readlines()
+    return contents[-1].strip()
 
-def single_test_type1(inputdata):
+def generate_type1(inputdata):
     (testnum, voice, noise) = inputdata
-    seed(testnum)
+    testpath = os.path.join(args.outdir, "type1", "test%d" % testnum)
     testgen = DTMFTest(voice, noise)
-    testpath = os.path.join(outdir, "type1", "test%d" % testnum)
-    knownres = testgen.make_file(testpath + ".raw", testpath + ".content")
+    testgen.make_file(testpath + ".raw", testpath + ".content")
+
+def single_test_type1(testnum):
+    testpath = os.path.join(args.outdir, "type1", "test%d" % testnum)
+    knownres = get_symstream(testpath)
     errfile = open(testpath + ".output", 'w')
     res = call_test_bin(testpath + ".raw", errfile)
     errfile.write("Expected: %s\n" % knownres)
@@ -254,13 +263,15 @@ def single_test_type1(inputdata):
     else:
         return testnum
 
-
-def single_test_type2(inputdata):
+def generate_type2(inputdata):
     (testnum, voice, noise) = inputdata
-    seed(testnum)
+    testpath = os.path.join(args.outdir, "type2", "test%d" % testnum)
     testgen = DTMFTestType2(voice, noise, restrict=True, endpound=True)
-    testpath = os.path.join(outdir, "type2", "test%d" % testnum)
     symstream = testgen.make_file(testpath + ".raw", testpath + ".content")
+
+def single_test_type2(testnum):
+    testpath = os.path.join(args.outdir, "type2", "test%d" % testnum)
+    symstream = get_symstream(testpath)
     knownres = [VALID_NUMBER_RE.match(x).group(1) for x in symstream.split(".")
                 if VALID_NUMBER_RE.match(x)]  # Gets only valid numbers
     errfile = open(testpath + ".output", 'w')
@@ -282,12 +293,27 @@ def single_test_type2(inputdata):
 
 if __name__ == "__main__":
     found_sep = False
+    retest = False
     voice = []
     noise = []
-    outdir = sys.argv[1]
-    ttype = sys.argv[2]
-    count = int(sys.argv[3])
-    for file in sys.argv[4:]:
+    parser = argparse.ArgumentParser(description="Test Suite for impl2")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--retest", action="store_true",
+        help="Rerun tets on existing files")
+    group.add_argument("--generate", action="store_true",
+        help="Generate test input only; do not run tests")
+    parser.add_argument("outdir", type=str, 
+        help="Directory to output generated test data.  Or with --retest, to\
+        read from")
+    parser.add_argument("test_type", type=str, default="both",
+        choices=["1", "2", "both"], help="type of test to run.")
+    parser.add_argument("count", type=int, 
+        help="Number of test cases to generate")
+    parser.add_argument("input_files", nargs=argparse.REMAINDER, 
+        help="Input files: voice files, then --, then noise files")
+    
+    args = parser.parse_args(args=sys.argv[1:])
+    for file in args.input_files:
         if not found_sep and file != "--":
             voice += [file]
         elif file == "--":
@@ -298,58 +324,66 @@ if __name__ == "__main__":
         print("Must provide both voice and noise files. Separate with --")
         exit(1)
 
-    if ttype not in ["1", "2", "both"]:
-        print "Test type must be one of 1, 2, or both"
-        exit(1)
-
-    #print(voice)
-    #print(noise)
-
-    successes = 0
-    failed = []
+    starttime = time()
     pool = multiprocessing.Pool()
 
-    if ttype == "1" or ttype == "both":
-        newdir = os.path.join(outdir, "type1")
+    if args.test_type == "1" or args.test_type == "both" and not args.retest:
+        newdir = os.path.join(args.outdir, "type1")
         try:
             makedirs(newdir)
             print "Created output directory " + newdir
         except OSError:
             print "Output directory " + newdir + " exists"
 
-        res = pool.map(single_test_type1, [
-                       (x, voice, noise) for x in range(count)])
+        start = time()
+        pool.map(generate_type1, [(x, voice, noise) for x in range(args.count)])
+        print "Generated type1 tests: %fs" % (time()-start)
+
+    if args.test_type == "2" or args.test_type == "both" and not args.retest:
+        newdir = os.path.join(args.outdir, "type2")
+        try:
+            makedirs(newdir)
+            print "Created output directory " + newdir
+        except OSError:
+            print "Output directory " + newdir + " exists"
+
+        start = time()
+        pool.map(generate_type2, [(x, voice, noise) for x in range(args.count)])
+        print "Generated type2 tests: %fs" % (time()-start)
+
+    if args.test_type == "1" or args.test_type == "both" and not args.generate:
+        successes = 0
+        failed = []
+        pool = multiprocessing.Pool()
+        start = time()
+        res = pool.map(single_test_type1, range(args.count))
+        print "Ran type1 tests: %fs" % (time()-start)
         for i in res:
             if i is True:
                 successes += 1
             else:
                 failed += [i]
         print "Type 1 test: %d/%d tests passed (%.1f%%)" % (
-            successes, count, (float(successes) / count) * 100.0)
+            successes, args.count, (float(successes) / args.count) * 100.0)
         print "Failed tests are:"
         print failed
 
-    if ttype == "2" or ttype == "both":
-        newdir = os.path.join(outdir, "type2")
-        try:
-            makedirs(newdir)
-            print "Created output directory " + newdir
-        except OSError:
-            print "Output directory " + newdir + " exists"
-
+    if args.test_type == "2" or args.test_type == "both" and not args.generate:
         # Now do type 2 tests
         successes = 0
         failed = []
         pool = multiprocessing.Pool()
-        res = pool.map(single_test_type2, [
-                       (x, voice, noise) for x in range(count)])
+        start = time()
+        res = pool.map(single_test_type2, range(args.count))
+        print "Ran type2 tests: %fs" % (time()-start)
         for i in res:
             if i is True:
                 successes += 1
             else:
-                # print i
                 failed += [i]
         print "Type 2 test: %d/%d tests passed (%.1f%%)" % (
-            successes, count, (float(successes) / count) * 100.0)
+            successes, args.count, (float(successes) / args.count) * 100.0)
         print "Failed tests are:"
         print failed
+        
+        print "Total wall clock time: %f" % (time() - starttime)
