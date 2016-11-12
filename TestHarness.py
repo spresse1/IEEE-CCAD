@@ -245,11 +245,15 @@ def get_symstream(testpath):
 
 def generate_type1(inputdata):
     (testnum, voice, noise) = inputdata
+    if testnum % 5000 == 0:
+        print "Type 1: %d" % testnum
     testpath = os.path.join(args.outdir, "type1", "test%d" % testnum)
     testgen = DTMFTest(voice, noise)
     testgen.make_file(testpath + ".raw", testpath + ".content")
 
 def single_test_type1(testnum):
+    if testnum % 5000 == 0:
+        print "Type 1: %d" % testnum
     testpath = os.path.join(args.outdir, "type1", "test%d" % testnum)
     knownres = get_symstream(testpath)
     errfile = open(testpath + ".output", 'w')
@@ -265,11 +269,15 @@ def single_test_type1(testnum):
 
 def generate_type2(inputdata):
     (testnum, voice, noise) = inputdata
+    if testnum % 5000 == 0:
+        print "Type 1: %d" % testnum
     testpath = os.path.join(args.outdir, "type2", "test%d" % testnum)
     testgen = DTMFTestType2(voice, noise, restrict=True, endpound=True)
     symstream = testgen.make_file(testpath + ".raw", testpath + ".content")
 
 def single_test_type2(testnum):
+    if testnum % 5000 == 0:
+        print "Type 2: %d" % testnum
     testpath = os.path.join(args.outdir, "type2", "test%d" % testnum)
     symstream = get_symstream(testpath)
     knownres = [VALID_NUMBER_RE.match(x).group(1) for x in symstream.split(".")
