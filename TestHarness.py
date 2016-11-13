@@ -16,7 +16,7 @@ SAMPLE_RATE = 8000
 BITS = 8
 MIN_VOICE_ON_TIME = 1000
 MAX_INTERDIGIT_TIME = 10 * 1000
-INPUT_COMP_TIME = 0
+INPUT_COMP_TIME = 100
 
 VALID_NUMBER_RE = re.compile("^[1]{0,1}([2-9][0-9]{9})[#]{0,1}$")
 
@@ -188,14 +188,15 @@ class DTMFTestType2(DTMFTest):
             else:
                 out = self.create_dtmf(outfile, contentfile)
                 string += out[0]
-                time = 0.0
                 running_non_dtmf = float(out[1])
                 if randint(0, 1) == 0:
+                    time=0
                     while time < MIN_VOICE_ON_TIME:
                         time += self.make_segment(
                             "Voice", self.voice, time, MIN_VOICE_ON_TIME,
                             outfile, contentfile)
                 else:
+                    time = float(out[1])
                     while time < MAX_INTERDIGIT_TIME:
                         time += self.make_segment("Noise", self.noise,
                                                   time, MAX_INTERDIGIT_TIME,

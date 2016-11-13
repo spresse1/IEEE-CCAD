@@ -112,7 +112,7 @@ FILE *log_output_file;
 #define MAX_DIGIT_INTERRUPT	10	// milliseconds
 #define MIN_VOICE_ON_TIME	1*1000 - 0*SAMPLE_LENGTH	//milliseconds
 
-#define THRESH_DTMF 10
+#define THRESH_DTMF 14
 #define THRESH_VOICE -25 //-25 for wavs and white noise, -37 for wavs & silence
 
 // Coefficient (k) calculated from DTMF frequency via k=N(fi/fs), where:
