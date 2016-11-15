@@ -229,8 +229,12 @@ BINFILE = "./ccad"
 
 
 def call_test_bin(infile, errfile):
-    res = subprocess.Popen([str(BINFILE), "-v", "-2", str(infile)],
-                           stdout=subprocess.PIPE, stderr=errfile)
+    try:
+        res = subprocess.Popen([str(BINFILE), "-v", "-2", str(infile)],
+                               stdout=subprocess.PIPE, stderr=errfile)
+    except OSError:
+        print "Binary under test not present or cannot be executed."
+        raise
     res.wait()
     output = res.stdout.read().strip()
     if res.returncode != 0:
