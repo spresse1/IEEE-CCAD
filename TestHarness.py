@@ -225,7 +225,7 @@ class DTMFTestType2(DTMFTest):
                           (stype, time + previous_runtime))
         return time
 
-BINFILE = "./impl2"
+BINFILE = "./ccad"
 
 
 def call_test_bin(infile, errfile):
@@ -297,7 +297,7 @@ if __name__ == "__main__":
     retest = False
     voice = []
     noise = []
-    parser = argparse.ArgumentParser(description="Test Suite for impl2")
+    parser = argparse.ArgumentParser(description="Test Suite for ccad")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--retest", action="store_true",
         help="Rerun tets on existing files")

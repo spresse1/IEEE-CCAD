@@ -63,7 +63,7 @@ into a format usable by this tool:
 ! audioconvert ! audioresample ! audio/x-raw, rate=8000, format=S8 ! \
   filesink location=file.raw
   
-Compile as:  cc -g -D_XOPEN_SOURCE=700 -std=c99 -lm -o impl2 impl2.c
+Compile as:  cc -g -D_XOPEN_SOURCE=700 -std=c99 -lm -o ccad ccad.c
 */
 
 #include <stdlib.h>
